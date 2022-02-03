@@ -1,0 +1,720 @@
+---
+title: "vignette"
+output: html_document
+---
+
+# Setup  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyr)
+library(dplyr)
+library(janitor)
+library(ggplot2)
+library(plotly)
+library(sf)
+library(lubridate)
+```
+
+```{r yield}
+yield <- read_sf("../data/yield/Keith Bowen-Colquitt-Shy North-Cotton.shp")
+
+```
+
+```{r boundary}
+boundary <- read_sf("../data/boundary/Keith Bowen_Colquitt_Shy North.shp")
+```
+
+# Initial wrangling  
+```{r yield_w}
+yield_w <- yield %>%
+  # Getting smaller sample for testing
+  #sample_frac(.1) %>%
+  clean_names() %>%
+  # Setting lat/long and transforming to UTM
+  st_transform(crs="EPSG:4326") %>%
+  st_transform(crs=26916) %>%
+  # Setting date, time, and speed
+  mutate(datetime=ymd_hms(iso_time)) %>%
+  mutate(date=date(datetime)) %>%
+  arrange(datetime) %>%
+  mutate(interval=interval(lag(datetime),datetime),
+         intlenght_sec=int_length(interval)) %>%
+  mutate(speed=distance/intlenght_sec) %>%
+  # Transforming units
+  mutate(distance_m=distance*0.3048,
+         swath_m=swathwidth*0.3048,
+         yield_lintkgha=(vryieldbal*480)*0.453592/0.404686,
+         elev_m=elevation*0.3048,
+         speed_kmh=speed*1.09728) %>%
+  # Selecting what's needed
+  dplyr::select(sectionid,
+                heading,
+                distance_m,
+                swath_m,
+                yield_lintkgha,
+                elev_m,
+                speed_kmh,
+                datetime,
+                date,
+                geometry) %>%
+  # Rounding
+  mutate(across(heading:speed_kmh, ~round(.,2)))
+
+yield_w
+#rm(yield)
+
+```
+
+```{r boundary_w}
+boundary_w <- boundary %>%
+  clean_names() %>%
+  # Setting lat/long and transforming to UTM
+  st_transform(crs="EPSG:4326") %>%
+  st_transform(crs=26916)
+```
+
+
+```{r bbb}
+bbb <- boundary_w %>%
+  st_bbox() 
+
+bbb[2] <- bbb[2] + 80
+bbb[4] <- bbb[4] + 80
+
+bbb_w <- bbb %>%
+  st_as_sfc() %>%
+  st_buffer(-480)
+
+yield_crop <- yield_w %>%
+  st_crop(bbb_w)
+
+ggplot()+
+  #geom_sf(data=yield_crop, size=.5)+
+  geom_sf(data=bbb_w, fill=NA)
+
+```
+
+```{r bitmap rotated}
+rotang = -5
+
+rot = function(a) matrix(c(cos(a), sin(a), -sin(a), cos(a)), 2, 2)
+
+tran = function(geo, ang, center) (geo - center) * rot(ang * pi / 180) + center
+
+center <- st_centroid(st_union(bbb_w))
+
+bitmap <- st_make_grid(bbb_w, 
+                       cellsize = .3,
+                       crs = 26916)
+
+bitmap_rot <- tran(bitmap, rotang, center) %>%
+  st_set_crs(26916)
+
+
+ggplot()+
+  #geom_sf(data=bitmap, fill=NA, size=.01)+
+  geom_sf(data=bitmap_rot, fill=NA, size=.1, color="purple")+
+  geom_sf(data=bbb_w, fill=NA)+
+  geom_sf(data=yield_crop, aes(color=heading), size=.1)+
+  #scale_color_gradient(low="red", high="green")+
+  coord_sf(xlim = c(713200.9+20, 713306.2-20), 
+           ylim = c(3453737-1, 3453762+1), 
+           expand = FALSE)+
+  theme(legend.position = "none")
+
+```
+
+```{r a0k}
+yield_crop %>%
+  arrange(datetime) %>%
+  mutate(a0k=swath_m*distance_m)
+```
+
+```{r overlap}
+bitmap <- st_make_grid(boundary_w, cellsize = .3)
+
+ggplot()+
+  geom_sf(data=bitmap)+
+  geom_sf(data=boundary_w, fill=NA, color="red")
+
+```
+
+# EDA  
+```{r stats_preclean}
+stats_preclean <- yield_w %>%
+  as_tibble() %>%
+  summarise(n=length(yield_lintkgha),
+            min=min(yield_lintkgha, na.rm=T),
+            median=median(yield_lintkgha, na.rm = T),
+            mean=mean(yield_lintkgha, na.rm=T),
+            max=max(yield_lintkgha, na.rm=T),
+            sd=sd(yield_lintkgha, na.rm=T),
+            cv=(sd/mean)*100
+  ) %>%
+  mutate(across(everything(), ~round(.,0))) %>%
+  mutate(type="raw")
+
+stats_preclean
+```
+
+```{r yield}
+yield_w %>%
+  ggplot(aes(x=yield_lintkgha))+
+  geom_density()+
+  labs(x="Lint yield (kg/ha)",
+       y="Kernel density",
+       title="Raw")+ 
+  scale_x_continuous(labels = function(x) format(x, scientific = F))
+
+ggsave(filename = "../output/1.rawdensity.png", width = 6, height = 4)
+
+```
+
+```{r distance}
+yield_w %>%
+  ggplot()+
+  geom_sf(aes(color=distance_m), size=.5)+
+  scale_color_gradient(low="red", high="green")
+
+```
+
+```{r distance v yield}
+yield_w %>%
+  ggplot(aes(x=distance_m, y=yield_lintkgha))+
+  geom_point()
+```
+Maybe only distances >2 or 3 should be kept.  
+
+```{r swath}
+yield_w %>%
+  dplyr::select(swath_m) %>%
+  summary()
+```
+swathwidth is a constant value.  
+
+```{r sectionid}
+yield_w %>%
+  mutate(sectionid=factor(sectionid)) %>%
+  ggplot()+
+  geom_sf(aes(color=sectionid), size=.5)
+
+```
+```{r heading}
+yield_w %>%
+  dplyr::select(heading) %>%
+  summary
+
+yield_w %>%
+  mutate(headingf=case_when(
+    heading > 0 & heading < 90 ~ "1",
+    heading > 90 & heading < 180 ~ "2",
+    heading > 180 & heading < 270 ~ "3",
+    heading > 270 ~ "4"
+  )) %>%
+  #group_by(headingf) %>%
+  #tally()
+  ggplot()+
+  geom_sf(aes(color=headingf), size=.5)
+```
+
+```{r timestamp}
+yield_w %>%
+  dplyr::select(datetime) %>%
+  summary
+
+```
+harvest happened along 4 days.
+
+```{r timestamp2}  
+yield_w %>%
+  mutate(date=factor(date)) %>%
+  ggplot()+
+  geom_sf(aes(color=date), size=.5)
+
+yield_w %>%
+  mutate(date=factor(date)) %>%
+  filter(date=="2019-12-02") %>%
+  ggplot()+
+  geom_sf(aes(color=datetime), size=.5)+
+  scale_color_datetime(low="red", high = "green")
+
+
+
+```
+
+```{r hours/d}
+yield_w %>%
+  as.data.frame() %>%
+  mutate(datef=factor(date)) %>%
+  group_by(datef) %>%
+  dplyr::summarise(min=min(datetime),
+                   max=max(datetime)) %>%
+  mutate(durationday=interval(min, max),
+         durationday_sec=int_length(durationday),
+         durationday_h=durationday_sec/3600)
+
+```
+Worked ~24h on the 30th?  
+
+```{r hours on the 30th}
+yield_w %>%
+  ggplot(aes(x=datetime, y=1))+
+  geom_point()
+
+```
+
+
+```{r speed}
+yield_w %>%
+  dplyr::select(speed_kmh) %>%
+  summary
+
+```
+
+# yieldeditR steps  
+## min and max yield  
+```{r min and max yield}
+yield_ye1 <- yield_w %>%
+  mutate(qhigh_pct=0.99,
+         qlow_pct=0.1,
+         scale=.25,
+         absminy_kgha=10) %>%
+  mutate(qhigh=quantile(yield_lintkgha, qhigh_pct),
+         qlow=quantile(yield_lintkgha, qlow_pct),
+         iqr=qhigh-qlow,
+         miny=ifelse(qlow-(iqr*scale)<absminy_kgha,
+                     absminy_kgha,
+                     qlow-(iqr*scale)),
+         maxy=qhigh+(iqr*scale)) %>%
+  mutate(flag=case_when(
+    yield_lintkgha < miny ~ "miny",
+    yield_lintkgha > maxy ~ "maxy",
+    T ~ NA_character_
+  )) %>%
+  dplyr::select(-qhigh_pct, -qlow_pct, -scale,
+                -qhigh, -qlow, -iqr)
+
+yield_ye1 %>%
+  as.data.frame() %>%
+  group_by(flag) %>%
+  tally() #%>%
+summarise(N=sum(n))
+
+```
+```{r stats_minmaxyield}
+stats_minmaxyield <- yield_ye1 %>%
+  as_tibble() %>%
+  filter(!grepl("miny|maxy", flag)) %>%
+  summarise(n=length(yield_lintkgha),
+            min=min(yield_lintkgha, na.rm=T),
+            median=median(yield_lintkgha, na.rm = T),
+            mean=mean(yield_lintkgha, na.rm=T),
+            max=max(yield_lintkgha, na.rm=T),
+            sd=sd(yield_lintkgha, na.rm=T),
+            cv=(sd/mean)*100
+  ) %>%
+  mutate(across(everything(), ~round(.,0))) %>%
+  mutate(type="minmaxyield")
+
+stats_minmaxyield 
+
+```
+
+```{r yield_ye1 density}
+yield_ye1 %>%
+  as_tibble() %>%
+  filter(!grepl("miny|maxy", flag)) %>%
+  ggplot(aes(x=yield_lintkgha))+
+  geom_density(fill="forestgreen", alpha=.5)
+```
+
+## min and max speed  
+```{r min and max speed}
+yield_ye2 <- yield_ye1 %>%
+  mutate(qhigh_pct=0.9,
+         qlow_pct=0.08,
+         scale=.18,
+         absminy_kmh=0.8) %>%
+  mutate(qhigh=quantile(speed_kmh, qhigh_pct, na.rm=T),
+         qlow=quantile(speed_kmh, qlow_pct, na.rm=T),
+         iqr=qhigh-qlow,
+         minv=ifelse(qlow-(iqr*scale)<absminy_kmh,
+                     absminy_kmh,
+                     qlow-(iqr*scale)),
+         maxv=qhigh+(iqr*scale)) %>%
+  mutate(flag=case_when(
+    speed_kmh < minv & is.na(flag) ~ "minv",
+    speed_kmh < minv & !is.na(flag) ~ paste0(flag,"-minv"),
+    speed_kmh > maxv & is.na(flag) ~ "maxv",
+    speed_kmh > maxv & !is.na(flag) ~ paste0(flag,"-maxv"),
+    !is.na(flag) ~ flag,
+    T ~ NA_character_
+  )) %>%
+  dplyr::select(-qhigh_pct, -qlow_pct, -scale,
+                -qhigh, -qlow, -iqr)
+
+yield_ye2 %>%
+  as.data.frame() %>%
+  group_by(flag) %>%
+  tally() #%>%
+summarise(N=sum(n))
+
+```
+
+```{r stats_minmaxsp}
+stats_minmaxsp <- yield_ye2 %>%
+  as_tibble() %>%
+  filter(!grepl("minv|maxv", flag)) %>%
+  summarise(n=length(yield_lintkgha),
+            min=min(yield_lintkgha, na.rm=T),
+            median=median(yield_lintkgha, na.rm = T),
+            mean=mean(yield_lintkgha, na.rm=T),
+            max=max(yield_lintkgha, na.rm=T),
+            sd=sd(yield_lintkgha, na.rm=T),
+            cv=(sd/mean)*100
+  ) %>%
+  mutate(across(everything(), ~round(.,0))) %>%
+  mutate(type="minmaxspeed")
+
+stats_minmaxsp 
+
+```
+
+```{r yield_ye2 density}
+yield_ye2 %>%
+  as_tibble() %>%
+  filter(!grepl("minv|maxv", flag)) %>%
+  ggplot(aes(x=yield_lintkgha))+
+  geom_density(fill="purple", alpha=.5)
+```
+```{r stats_minmaxyieldsp}
+stats_minmaxyieldsp <- yield_ye2 %>%
+  as_tibble() %>%
+  filter(!grepl("miny|maxy|minv|maxv", flag)) %>%
+  summarise(n=length(yield_lintkgha),
+            min=min(yield_lintkgha, na.rm=T),
+            median=median(yield_lintkgha, na.rm = T),
+            mean=mean(yield_lintkgha, na.rm=T),
+            max=max(yield_lintkgha, na.rm=T),
+            sd=sd(yield_lintkgha, na.rm=T),
+            cv=(sd/mean)*100
+  ) %>%
+  mutate(across(everything(), ~round(.,0))) %>%
+  mutate(type="minmaxyield+minmaxspeed")
+
+stats_minmaxyieldsp 
+
+```
+
+```{r yield_ye1 and 2 plot}
+yield_ye2 %>%
+  as_tibble() %>%
+  filter(!grepl("miny|maxy|minv|maxv", flag)) %>%
+  ggplot(aes(x=yield_lintkgha))+
+  geom_density(fill="red", alpha=.5)
+
+```
+
+## pos  
+
+For the POS parameter, the original paper uses the IQR of easting and northing + 40 m. I think a negative buffer from the field boundaries would work just as well.
+```{r pos}
+yield_ye3 <- yield_ye2 %>%
+  st_coordinates() %>%
+  as_tibble() %>%
+  dplyr::select(-Z) %>%
+  bind_cols(yield_ye2) %>%
+  mutate(qhigh_pct=0.995,
+         qlow_pct=0.005,
+         buffer_m=40) %>%
+  mutate(qhigh_x=quantile(X, qhigh_pct, na.rm=T),
+         qlow_x=quantile(X, qlow_pct, na.rm=T),
+         iqr_x=qhigh_x-qlow_x,
+         minx=qlow_x-buffer_m,
+         maxx=qhigh_x+buffer_m) %>%
+  mutate(qhigh_y=quantile(Y, qhigh_pct, na.rm=T),
+         qlow_y=quantile(Y, qlow_pct, na.rm=T),
+         iqr_y=qhigh_y-qlow_y,
+         miny=qlow_y-buffer_m,
+         maxy=qhigh_y+buffer_m) %>%
+  mutate(flag=case_when(
+    X < minx  | X > maxx |
+      Y < miny | Y > maxy & is.na(flag) ~ "pos",
+    X < minx | X > maxx |
+      Y < miny | Y > maxy & !is.na(flag) ~ paste0(flag,"-pos"),
+    !is.na(flag) ~ flag,
+    T ~ NA_character_
+  )) %>%
+  dplyr::select(-qhigh_pct, -qlow_pct, -buffer_m,
+                -qhigh_x, -qlow_x, -iqr_x,
+                -qhigh_y, -qlow_y, -iqr_y)
+
+yield_ye3 %>%
+  as.data.frame() %>%
+  group_by(flag) %>%
+  tally
+```
+Nothing was flagged.
+Perhaps using the boundary would be better
+
+```{r pos with boundary}
+yield_ye3 <- yield_ye2 %>%
+  st_within(st_buffer(boundary_w, -20), sparse = F) %>%
+  as_tibble() %>%
+  rename(pos=V1) %>%
+  bind_cols(yield_ye2) %>%
+  st_as_sf() %>%
+  mutate(flag=case_when(
+    pos == F & is.na(flag) ~ "pos",
+    pos == F & !is.na(flag) ~ paste0(flag,"-pos"),
+    !is.na(flag) ~ flag,
+    T ~ NA_character_
+  )) 
+
+
+yield_ye3 %>%
+  group_by(pos) %>%
+  tally()
+
+yield_ye3 %>%
+  group_by(flag) %>%
+  tally()
+
+
+ggplot()+
+  geom_sf(data=yield_ye3, size=.5, aes(color=pos))+
+  geom_sf(data=boundary_w, fill=NA, color="red")+
+  geom_sf(data=st_buffer(boundary_w,-20), fill=NA, color="blue")
+
+```
+```{r stats_pos}
+stats_pos <- yield_ye3 %>%
+  as_tibble() %>%
+  filter(!grepl("pos", flag)) %>%
+  summarise(n=length(yield_lintkgha),
+            min=min(yield_lintkgha, na.rm=T),
+            median=median(yield_lintkgha, na.rm = T),
+            mean=mean(yield_lintkgha, na.rm=T),
+            max=max(yield_lintkgha, na.rm=T),
+            sd=sd(yield_lintkgha, na.rm=T),
+            cv=(sd/mean)*100
+  ) %>%
+  mutate(across(everything(), ~round(.,0))) %>%
+  mutate(type="pos")
+
+stats_pos 
+
+```
+
+```{r yield_ye3 plot}
+yield_ye3 %>%
+  as_tibble() %>%
+  filter(!grepl("pos", flag)) %>%
+  ggplot(aes(x=yield_lintkgha))+
+  geom_density(fill="pink", alpha=.5)
+
+```
+
+```{r stats_minmaxyieldsppos}
+stats_minmaxyieldsppos <- yield_ye3 %>%
+  as_tibble() %>%
+  filter(!grepl("miny|maxy|minv|maxv|pos", flag)) %>%
+  summarise(n=length(yield_lintkgha),
+            min=min(yield_lintkgha, na.rm=T),
+            median=median(yield_lintkgha, na.rm = T),
+            mean=mean(yield_lintkgha, na.rm=T),
+            max=max(yield_lintkgha, na.rm=T),
+            sd=sd(yield_lintkgha, na.rm=T),
+            cv=(sd/mean)*100
+  ) %>%
+  mutate(across(everything(), ~round(.,0))) %>%
+  mutate(type="minmaxyield+minmaxspeed+pos")
+
+stats_minmaxyieldsppos 
+
+```
+
+```{r yield_ye1 2 and 3 plot}
+yield_ye3 %>%
+  as_tibble() %>%
+  filter(!grepl("miny|maxy|minv|maxv|pos", flag)) %>%
+  ggplot(aes(x=yield_lintkgha))+
+  geom_density(fill="yellow", alpha=.5)
+
+```
+
+
+## overlap  
+```{r overlap}
+bitmap <- st_make_grid(boundary_w, cellsize = .3)
+
+ggplot()+
+  geom_sf(data=bitmap)+
+  geom_sf(data=boundary_w, fill=NA, color="red")
+
+```
+# Report 
+```{r yield}
+yield_w %>%
+  ggplot()+
+  geom_sf(aes(color=yield_lintkgha), size=.2)+
+  scale_color_gradient(low="red", high="green")+
+  labs(color="Lint yield\n(kg/ha)")
+
+```
+
+```{r yield}
+yieldmap_plot <- yield_w %>%
+  filter(yield_lintkgha<5000) %>%
+  ggplot()+
+  geom_sf(aes(color=yield_lintkgha), size=.2)+
+  scale_color_gradient(low="red", high="green")+
+  labs(color="Lint yield\n(kg/ha)", title="Raw")+
+  theme(legend.position = "bottom",
+        legend.key.width= unit(1.5, 'cm'))
+
+yieldmap_plot
+
+ggsave(yieldmap_plot, filename =  "../output/2.rawmap.png", width = 7, height = 6)
+
+```
+
+## Table  
+```{r table individual filters}
+stats_preclean %>%
+  bind_rows(stats_minmaxyield) %>%
+  bind_rows(stats_minmaxsp) %>%
+  bind_rows(stats_pos) %>%
+  mutate(n_pctoriginal=round(n/142944,2)) %>%
+  dplyr::select(type, n, n_pctoriginal, everything()) %>%
+  readr::write_csv("../output/table1.csv")
+
+```
+
+```{r table combined filters}
+stats_comb <- stats_preclean %>%
+  bind_rows(stats_minmaxyield) %>%
+  bind_rows(stats_minmaxyieldsp) %>%
+  bind_rows(stats_minmaxyieldsppos) %>%
+  mutate(n_pctoriginal=round(n/142944,2)) %>%
+  dplyr::select(type, n, n_pctoriginal, everything())
+
+stats_comb
+
+readr::write_csv(stats_comb, "../output/table2.csv")
+```
+
+## Plot  
+```{r raw yield density}
+yield_w %>%
+  ggplot(aes(x=yield_lintkgha))+
+  geom_density()+
+  labs(y="Kernel density", x="Lint yield (kg/ha)")
+
+```
+
+```{r density plot combined filters}
+yield_w %>%
+  #filter(yield_lintkgha<5000) %>%
+  mutate(type="raw") %>%
+  bind_rows(yield_ye1 %>%
+              as_tibble() %>%
+              filter(!grepl("miny|maxy", flag)) %>%
+              mutate(type="minmaxyield")) %>%
+  bind_rows(yield_ye2 %>%
+              as_tibble() %>%
+              filter(!grepl("miny|maxy|minv|maxv", flag)) %>%
+              mutate(type="minmaxyield+minmaxspeed")) %>%
+  bind_rows(yield_ye3 %>%
+              as_tibble() %>%
+              filter(!grepl("miny|maxy|minv|maxv|pos", flag)) %>%
+              mutate(type="minmaxyield+minmaxspeed+pos")) %>%
+  ggplot()+
+  #ggridges::geom_density_ridges
+  geom_density(aes(x=yield_lintkgha, 
+                   #y=type, 
+                   fill=type), 
+               alpha=.6)+
+  #geom_vline(data=stats_comb, aes(xintercept=mean))+
+  theme(legend.position = "bottom")+
+  labs(x="Lint yield (kg/ha)", y="Kernel density")
+
+
+
+
+```
+
+```{r map combined}
+yield_ye3 %>%
+  filter(!is.na(flag)) %>%
+  ggplot()+
+  geom_sf(aes(color=flag), size=.2)+
+  guides(color = guide_legend(override.aes = list(size = 3)))
+  
+
+ggsave(filename =  "../output/3.removedmap.png", width = 7, height = 6)
+
+```
+```{r}
+yield_ye3 %>%
+  as_tibble() %>%
+  group_by(flag) %>%
+  tally() %>%
+  arrange(desc(n)) %>%
+  readr::write_csv("../output/table3.csv")
+```
+
+
+```{r yield map filtered}
+yieldmapclean_plot <- yield_ye3 %>%
+  filter(is.na(flag)) %>%
+  ggplot()+
+  geom_sf(aes(color=yield_lintkgha), size=.2)+
+  scale_color_gradient(low="red", high="green")+
+  labs(color="Lint yield\n(kg/ha)", title="Cleaned")+
+  theme(legend.position = "bottom",
+        legend.key.width= unit(1.5, 'cm'))
+
+yieldmapclean_plot
+
+
+
+```
+
+```{r pre-post cleaning map}
+library(patchwork)
+yieldmap_plot+yieldmapclean_plot
+
+ggsave(filename =  "../output/4.raw-cleanmap.png", width = 12, height = 6)
+```
+
+
+# TO-DO  
+Need to find out:  
+- unit on distance: it is feet  
+- unit on swath: probably feet    
+- unit on wet mass: lbs
+- how is yield calculated (swath, distance, wet mass?)  
+- is there a moisture column?  check on Ops center. checked, didn't find  
+- Has delay already being fixed on ops? If not, what would be a good estimate? 2 secs?
+
+Need to fix projection  (DONE)
+
+# Needed for yield editor:  
+- Yield  
+- Speed  
+
+# Notes:  
+Cotton delay is a lot less than grain delay (2 secs vs. 12 secs).  
+
+# Questions to JD  
+- how is yield calculated (swath, distance, wet mass? moisture?)  
+- is there a moisture column?  
+- Has delay already being fixed on ops? If not, what would be a good estimate? 2 secs?
+- Have any other transformations been made to the data on ops?  
+
+
+
+
+

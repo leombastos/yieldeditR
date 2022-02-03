@@ -1,0 +1,5 @@
+type,n,n_pctoriginal,min,median,mean,max,sd,cv
+raw,142944,1,18,1865,1828,515949,2666,146
+minmaxyield,141493,0.99,66,1869,1808,3989,741,41
+minmaxyield+minmaxspeed,141222,0.99,66,1871,1811,3989,739,41
+minmaxyield+minmaxspeed+pos,131674,0.92,66,1914,1862,3989,709,38

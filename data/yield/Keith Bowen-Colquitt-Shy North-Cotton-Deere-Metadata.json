@@ -1,0 +1,80 @@
+{
+  "Version": "1.0",
+  "OrgId": 197078,
+  "ClientId": "2cc29b96-0556-4615-a790-070d850a1d73",
+  "ClientName": "Keith Bowen",
+  "FarmId": "ffa5fe02-6b32-4926-acf0-825da2f22198",
+  "FarmName": "Colquitt",
+  "FieldId": "faa02543-d8f1-427c-967c-7b9e8c4460be",
+  "FieldName": "Shy North",
+  "Operation": "Harvest",
+  "CropSeason": 2019,
+  "CropToken": "COTTON",
+  "FileCreatedTimeStamp": "2019-12-17T20:46:15.4846788Z",
+  "DataAttributes": [
+    {
+      "Name": "DISTANCE",
+      "Unit": "ft",
+      "Description": "Distance Travelled From Previous Point"
+    },
+    {
+      "Name": "SWATHWIDTH",
+      "Unit": "ft",
+      "Description": "Width Of Element"
+    },
+    {
+      "Name": "VRYIELDBAL",
+      "Unit": "bale1ac-1",
+      "Description": "Yield as Bales"
+    },
+    {
+      "Name": "SECTIONID",
+      "Description": "Element Id"
+    },
+    {
+      "Name": "Crop",
+      "Description": "CropId"
+    },
+    {
+      "Name": "Moisture",
+      "Unit": "prcnt",
+      "Description": "Moisture"
+    },
+    {
+      "Name": "WetMass",
+      "Unit": "lb1ac-1",
+      "Description": "Wet Mass"
+    },
+    {
+      "Name": "Time",
+      "Description": "Timestamp"
+    },
+    {
+      "Name": "Heading",
+      "Description": "Machine Heading"
+    },
+    {
+      "Name": "VARIETY",
+      "Description": "Variety Name"
+    },
+    {
+      "Name": "Elevation",
+      "Unit": "ft",
+      "Description": "Elevation"
+    },
+    {
+      "Name": "IsoTime",
+      "Description": "Precise Timestamp"
+    },
+    {
+      "Name": "Machine",
+      "Description": "Index into the MachineUsage map, or 0 if no information exists"
+    }
+  ],
+  "MachineUsage": {
+    "1": {
+      "MachineId": "5dd7ea7b-0000-1000-7fa4-e1e1e13927e0",
+      "MachineSerial": "1N0C690PHK4075612"
+    }
+  }
+}
