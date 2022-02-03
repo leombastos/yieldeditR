@@ -238,9 +238,10 @@ yield**.
 - The combination of **all 5 filters** produced data with the **least
 variability** based on theoretically sound reasons.
 
-Next steps:  
-1. Implement other filters identified as important by Sudduth et
-al. (2012), like the **delay and overlap filters**.
+Next steps:
+
+1.  Implement other filters identified as important by Sudduth et
+    al. (2012), like the **delay and overlap filters**.
 
 2.  Test filters on more cotton yield monitor data sets and obtain a
     generalizable measure of importance for cleaning this type of data.
