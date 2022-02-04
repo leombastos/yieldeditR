@@ -34,6 +34,8 @@ yield_w <- yield %>%
   # Setting lat/long and transforming to UTM
   st_transform(crs="EPSG:4326") %>%
   st_transform(crs=26916) %>%
+  # there are 3 sectionid values for each day, all three with same information except x,y
+  filter(sectionid %in% c(348, 511, 593, 617)) %>%
   # Setting date, time, and speed
   mutate(datetime=ymd_hms(iso_time)) %>%
   mutate(date=date(datetime)) %>%
@@ -63,6 +65,10 @@ yield_w <- yield %>%
 
 yield_w
 #rm(yield)
+
+yield_w %>%
+  group_by(sectionid) %>%
+  tally
 
 ```
 
@@ -184,7 +190,7 @@ yield_w %>%
   ggplot(aes(x=distance_m, y=yield_lintkgha))+
   geom_point()
 ```
-Maybe only distances >2 or 3 should be kept.  
+Maybe only distances >2 or 3 feet (.5 or 1 m) should be kept.  
 
 ```{r swath}
 yield_w %>%
@@ -299,7 +305,7 @@ yield_ye1 %>%
   as.data.frame() %>%
   group_by(flag) %>%
   tally() #%>%
-summarise(N=sum(n))
+#summarise(N=sum(n))
 
 ```
 ```{r stats_minmaxyield}
@@ -329,8 +335,8 @@ yield_ye1 %>%
   geom_density(fill="forestgreen", alpha=.5)
 ```
 
-## min and max speed  
-```{r min and max speed}
+## min and max velocity  
+```{r min and max velocity}
 yield_ye2 <- yield_ye1 %>%
   mutate(qhigh_pct=0.9,
          qlow_pct=0.08,
@@ -358,7 +364,7 @@ yield_ye2 %>%
   as.data.frame() %>%
   group_by(flag) %>%
   tally() #%>%
-summarise(N=sum(n))
+#summarise(N=sum(n))
 
 ```
 
@@ -544,6 +550,115 @@ yield_ye3 %>%
 
 ```
 
+## inliers  
+```{r neighborhood}
+init <- Sys.time()
+library(spdep)
+
+yield_nb <- yield_ye3 %>%
+  st_coordinates() %>%
+  as.data.frame() %>%
+  dplyr::select(X, Y) %>%
+  coordinates() %>%
+  dnearneigh(d1 = 0, d2 = 25) %>%
+  nb2listw(style = "W")
+
+end <- Sys.time()
+
+end - init #1.2 mins
+```
+
+```{r local moran and moran plot}
+yield_ye4 <- yield_ye3 %>%
+  # local moran
+  bind_cols(
+    localmoran(yield_ye3$yield_lintkgha,
+               yield_nb,
+               p.adjust.method="bonferroni",
+               alternative ="less") %>%
+      as.data.frame() %>%
+      rename(pvalue=`Pr(z < E(Ii))`)) %>%
+  #moran plot
+  bind_cols(
+    moran.plot(yield_ye3$yield_lintkgha, 
+               yield_nb,
+               quiet=T,
+               labels=F,
+               col=3,
+               zero.policy=F,
+               xlab="Yield", 
+               ylab="Yield Spatially Lagged")
+  ) %>%
+  # Flagging
+  mutate(flag=case_when(
+    (Ii < 0 | pvalue < 0.05 | is_inf == T) & is.na(flag) ~ "inlier",
+    (Ii < 0 | pvalue < 0.05 | is_inf == T) & !is.na(flag) ~ paste0(flag,"-inlier"),
+    !is.na(flag) ~ flag,
+    T ~ NA_character_
+  )) 
+
+yield_ye4 %>%
+  group_by(flag) %>%
+  tally
+
+```
+
+```{r stats_inlier}
+stats_inlier <- yield_ye4 %>%
+  as_tibble() %>%
+  filter(!grepl("inlier", flag)) %>%
+  summarise(n=length(yield_lintkgha),
+            min=min(yield_lintkgha, na.rm=T),
+            median=median(yield_lintkgha, na.rm = T),
+            mean=mean(yield_lintkgha, na.rm=T),
+            max=max(yield_lintkgha, na.rm=T),
+            sd=sd(yield_lintkgha, na.rm=T),
+            cv=(sd/mean)*100
+  ) %>%
+  mutate(across(everything(), ~round(.,0))) %>%
+  mutate(type="pos")
+
+stats_inlier 
+
+```
+
+```{r yield_ye4 plot}
+yield_ye4 %>%
+  as_tibble() %>%
+  filter(!grepl("inlier", flag)) %>%
+  ggplot(aes(x=yield_lintkgha))+
+  geom_density(fill="pink", alpha=.5)
+
+```
+
+```{r stats_minmaxyieldspposinlier}
+stats_minmaxyieldspposinlier <- yield_ye4 %>%
+  as_tibble() %>%
+  filter(!grepl("miny|maxy|minv|maxv|pos|inlier", flag)) %>%
+  summarise(n=length(yield_lintkgha),
+            min=min(yield_lintkgha, na.rm=T),
+            median=median(yield_lintkgha, na.rm = T),
+            mean=mean(yield_lintkgha, na.rm=T),
+            max=max(yield_lintkgha, na.rm=T),
+            sd=sd(yield_lintkgha, na.rm=T),
+            cv=(sd/mean)*100
+  ) %>%
+  mutate(across(everything(), ~round(.,0))) %>%
+  mutate(type="minmaxyield+minmaxspeed+pos+inlier")
+
+stats_minmaxyieldspposinlier 
+
+```
+
+```{r yield_ye1 2 3 and 4 plot}
+yield_ye4 %>%
+  as_tibble() %>%
+  filter(!grepl("miny|maxy|minv|maxv|pos|inlier", flag)) %>%
+  ggplot(aes(x=yield_lintkgha))+
+  geom_density(fill="yellow", alpha=.5)
+
+```
+
 
 ## overlap  
 ```{r overlap}
@@ -555,7 +670,7 @@ ggplot()+
 
 ```
 # Report 
-```{r yield}
+```{r raw map}
 yield_w %>%
   ggplot()+
   geom_sf(aes(color=yield_lintkgha), size=.2)+
@@ -564,7 +679,7 @@ yield_w %>%
 
 ```
 
-```{r yield}
+```{r raw map constrained}
 yieldmap_plot <- yield_w %>%
   filter(yield_lintkgha<5000) %>%
   ggplot()+
@@ -586,6 +701,7 @@ stats_preclean %>%
   bind_rows(stats_minmaxyield) %>%
   bind_rows(stats_minmaxsp) %>%
   bind_rows(stats_pos) %>%
+  bind_rows(stats_inlier) %>%
   mutate(n_pctoriginal=round(n/142944,2)) %>%
   dplyr::select(type, n, n_pctoriginal, everything()) %>%
   readr::write_csv("../output/table1.csv")
@@ -597,7 +713,8 @@ stats_comb <- stats_preclean %>%
   bind_rows(stats_minmaxyield) %>%
   bind_rows(stats_minmaxyieldsp) %>%
   bind_rows(stats_minmaxyieldsppos) %>%
-  mutate(n_pctoriginal=round(n/142944,2)) %>%
+  bind_rows(stats_minmaxyieldspposinlier) %>%
+  mutate(n_pctoriginal=round(n/47508,2)) %>%
   dplyr::select(type, n, n_pctoriginal, everything())
 
 stats_comb
@@ -630,6 +747,11 @@ yield_w %>%
               as_tibble() %>%
               filter(!grepl("miny|maxy|minv|maxv|pos", flag)) %>%
               mutate(type="minmaxyield+minmaxspeed+pos")) %>%
+  bind_rows(yield_ye4 %>%
+              as_tibble() %>%
+              filter(!grepl("miny|maxy|minv|maxv|pos|inlier", flag)) %>%
+              mutate(type="minmaxyield+minmaxspeed+pos+inlier")
+  ) %>%
   ggplot()+
   #ggridges::geom_density_ridges
   geom_density(aes(x=yield_lintkgha, 
@@ -638,7 +760,8 @@ yield_w %>%
                alpha=.6)+
   #geom_vline(data=stats_comb, aes(xintercept=mean))+
   theme(legend.position = "bottom")+
-  labs(x="Lint yield (kg/ha)", y="Kernel density")
+  labs(x="Lint yield (kg/ha)", y="Kernel density")+
+  scale_x_continuous(limits = c(0, 4000))
 
 
 
@@ -646,18 +769,18 @@ yield_w %>%
 ```
 
 ```{r map combined}
-yield_ye3 %>%
+yield_ye4 %>%
   filter(!is.na(flag)) %>%
   ggplot()+
   geom_sf(aes(color=flag), size=.2)+
   guides(color = guide_legend(override.aes = list(size = 3)))
-  
+
 
 ggsave(filename =  "../output/3.removedmap.png", width = 7, height = 6)
 
 ```
 ```{r}
-yield_ye3 %>%
+yield_ye4 %>%
   as_tibble() %>%
   group_by(flag) %>%
   tally() %>%
@@ -667,7 +790,7 @@ yield_ye3 %>%
 
 
 ```{r yield map filtered}
-yieldmapclean_plot <- yield_ye3 %>%
+yieldmapclean_plot <- yield_ye4 %>%
   filter(is.na(flag)) %>%
   ggplot()+
   geom_sf(aes(color=yield_lintkgha), size=.2)+
