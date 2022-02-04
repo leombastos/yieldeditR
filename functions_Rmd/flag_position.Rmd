@@ -1,0 +1,48 @@
+---
+title: "flag_position"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r flag_position}
+flag_position <- function(df,
+                          boundary,
+                          buffer_m=20) {
+  
+  #libraries
+  library(tidyr, quietly = T)
+  library(dplyr, quietly = T)
+  library(janitor, quietly = T)
+  library(sf, quietly = T)
+  
+  
+  df_w <- df %>%
+    st_within(st_buffer(boundary, -buffer_m), sparse = F) %>%
+    as_tibble() %>%
+    rename(pos=V1) %>%
+    bind_cols(df) %>%
+    st_as_sf() %>%
+    mutate(flag=case_when(
+      pos == F & is.na(flag) ~ "pos",
+      pos == F & !is.na(flag) ~ paste0(flag,"-pos"),
+      !is.na(flag) ~ flag,
+      T ~ NA_character_
+    )) 
+  
+  return(df_w)
+  
+}
+
+```
+
+```{r testing}
+yield_w %>%
+  mutate(yield_kgha=yield_lintkgha) %>%
+  flag_yield() %>%
+  flag_position(., boundary_w)
+```
+

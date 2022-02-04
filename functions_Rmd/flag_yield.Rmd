@@ -1,0 +1,49 @@
+---
+title: "flag_yield"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r flag_yield}
+flag_yield <- function(df, 
+                       qhigh_pct=0.99, qlow_pct=0.1, 
+                       scale=.25, absminy_kgha=10) {
+  
+  #libraries
+  library(tidyr, quietly = T)
+  library(dplyr, quietly = T)
+  library(janitor, quietly = T)
+  library(sf, quietly = T)
+  
+  
+  df_w <- df %>%
+    mutate(qhigh=quantile(yield_kgha, qhigh_pct),
+           qlow=quantile(yield_kgha, qlow_pct),
+           iqr=qhigh-qlow,
+           miny=ifelse(qlow-(iqr*scale)<absminy_kgha,
+                       absminy_kgha,
+                       qlow-(iqr*scale)),
+           maxy=qhigh+(iqr*scale)) %>%
+    mutate(flag=case_when(
+      yield_kgha < miny ~ "miny",
+      yield_kgha > maxy ~ "maxy",
+      T ~ NA_character_
+    )) %>%
+    dplyr::select(-qhigh, -qlow, -iqr)
+  
+  return(df_w)
+  
+}
+
+```
+
+```{r testing}
+yield_w %>%
+  mutate(yield_kgha=yield_lintkgha) %>%
+  flag_yield()
+```
+

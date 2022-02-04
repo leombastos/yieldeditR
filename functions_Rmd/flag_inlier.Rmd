@@ -1,0 +1,67 @@
+---
+title: "flag_inlier"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+```
+
+```{r flag_inlier}
+flag_inlier <- function(df) {
+  #libraries
+  library(tidyr, quietly = T)
+  library(dplyr, quietly = T)
+  library(janitor, quietly = T)
+  library(sf, quietly = T)
+  library(spdep, quietly = T)
+  
+  df_nb <- df %>%
+    st_coordinates() %>%
+    as.data.frame() %>%
+    dplyr::select(X, Y) %>%
+    coordinates() %>%
+    dnearneigh(d1 = 0, d2 = 25) %>%
+    nb2listw(style = "W")
+  
+  df_w <- df %>%
+    # local moran
+    bind_cols(
+      localmoran(df$yield_kgha,
+                 df_nb,
+                 p.adjust.method="bonferroni",
+                 alternative ="less") %>%
+        as.data.frame() %>%
+        rename(pvalue=`Pr(z < E(Ii))`)) %>%
+    #moran plot
+    bind_cols(
+      moran.plot(df$yield_kgha, 
+                 df_nb,
+                 quiet=T,
+                 labels=F,
+                 col=3,
+                 zero.policy=F,
+                 plot=F)
+    ) %>%
+    # Flagging
+    mutate(flag=case_when(
+      (Ii < 0 | pvalue < 0.05 | is_inf == T) & is.na(flag) ~ "inlier",
+      (Ii < 0 | pvalue < 0.05 | is_inf == T) & !is.na(flag) ~ paste0(flag,"-inlier"),
+      !is.na(flag) ~ flag,
+      T ~ NA_character_
+    )) 
+  
+  return(df_w)
+  
+}
+
+```
+
+```{r testing}
+yield_w %>%
+  mutate(yield_kgha=yield_lintkgha) %>%
+  flag_yield() %>%
+  flag_inlier()
+```

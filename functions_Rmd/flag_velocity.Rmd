@@ -1,0 +1,52 @@
+---
+title: "flag_velocity"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r flag_velocity}
+flag_velocity <- function(df, 
+                          qhigh_pct=0.9, qlow_pct=0.08,
+                          scale=.18, absminy_kmh=0.8) {
+  
+  #libraries
+  library(tidyr, quietly = T)
+  library(dplyr, quietly = T)
+  library(janitor, quietly = T)
+  library(sf, quietly = T)
+  
+  df_w <- df %>%
+    mutate(qhigh=quantile(speed_kmh, qhigh_pct, na.rm=T),
+           qlow=quantile(speed_kmh, qlow_pct, na.rm=T),
+           iqr=qhigh-qlow,
+           minv=ifelse(qlow-(iqr*scale)<absminy_kmh,
+                       absminy_kmh,
+                       qlow-(iqr*scale)),
+           maxv=qhigh+(iqr*scale)) %>%
+    mutate(flag=case_when(
+      speed_kmh < minv & is.na(flag) ~ "minv",
+      speed_kmh < minv & !is.na(flag) ~ paste0(flag,"-minv"),
+      speed_kmh > maxv & is.na(flag) ~ "maxv",
+      speed_kmh > maxv & !is.na(flag) ~ paste0(flag,"-maxv"),
+      !is.na(flag) ~ flag,
+      T ~ NA_character_
+    )) %>%
+    dplyr::select(-qhigh, -qlow, -iqr)
+  
+  return(df_w)
+  
+}
+
+```
+
+```{r testing}
+yield_w %>%
+  mutate(yield_kgha=yield_lintkgha) %>%
+  flag_yield() %>%
+  flag_velocity()
+```
+
