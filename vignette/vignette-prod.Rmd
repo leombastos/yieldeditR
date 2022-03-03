@@ -841,3 +841,4 @@ Cotton delay is a lot less than grain delay (2 secs vs. 12 secs).
 
 
 
+
